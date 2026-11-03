@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Apple retires installer URLs without notice. Probing weekly catches that
+    # on a quiet repository instead of halfway through a build.
+    - cron: '0 6 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -39,6 +43,21 @@ jobs:
 
           echo "resolved $count releases"
 
+  apple-urls:
+    name: Apple URLs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Probe every download URL
+        # A retired object on Apple's CDN answers 403, so the script treats
+        # 401/403/404/410 as gone and only fails on those. Transient 5xx and
+        # timeouts are reported but do not fail the run.
+        run: ./tools/probe-urls.sh
+
   shellcheck:
     name: Shellcheck
     runs-on: ubuntu-latest
@@ -49,7 +68,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Shellcheck errors
-        run: shellcheck --severity=error mkmaciso tools/check-versions.sh
+        run: shellcheck --severity=error mkmaciso tools/check-versions.sh tools/probe-urls.sh tools/verify-on-macos.sh
 
       - name: Shellcheck report
-        run: shellcheck --format=gcc mkmaciso tools/check-versions.sh || true
+        run: shellcheck --format=gcc mkmaciso tools/check-versions.sh tools/probe-urls.sh tools/verify-on-macos.sh || true

@@ -101,6 +101,9 @@ Only the pieces that hardcoded the upstream owner, depended on upstream-only pri
 | `versions.tsv` is now the single source of truth | Release facts used to be copied into 5 places in `mkmaciso` plus a `case` block in the recovery workflow. Now there is one table. |
 | `mkmaciso --list`, `--dry-run`, `--dump-versions` | `--dry-run` resolves the version and prints the plan without downloading, which is what makes the table testable in CI. |
 | `tools/check-versions.sh` + `quality.yml` | Validates the table's schema and fails when it disagrees with the workflow option lists. |
+| `tools/probe-urls.sh` | HEAD-probes every download URL, including each component a `catalog-base` row needs. Gone links are caught the week Apple retires them, not 40 minutes into a build. |
+| `tools/verify-on-macos.sh` | One command to run every check, optionally do a real build, verify the artifact with `hdiutil`, and emit a QEMU boot script. |
+| `quality.yml` gained a weekly cron | A quiet repository still notices when Apple moves a URL. |
 | `tr -d '_- '` replaced with `sed` | `tr` treats `_` to space as a reversed range and aborts under some locales, which killed the script before it printed anything. |
 
 Keeping this fork in sync with upstream is a `git merge` of the two workflow files; only the `preflight` job and the deleted cron workflow are expected to conflict.
@@ -117,6 +120,32 @@ One row in `versions.tsv`, then let CI tell you what else to touch:
 4. Run `./mkmaciso <version> iso --dry-run` to confirm the row resolves.
 
 Nothing in the script needs editing.
+
+---
+
+## Verifying a build
+
+Four things can go wrong here, and only the last one needs a Mac.
+
+| Layer | What breaks | Checked by |
+|---|---|---|
+| Table and parsing | a row that cannot be resolved | `mkmaciso <version> --dry-run`, `tools/check-versions.sh` — anywhere |
+| Workflows | an option list drifting from the table | `tools/check-versions.sh` — anywhere |
+| Apple's servers | a download URL Apple has retired | `tools/probe-urls.sh` — anywhere |
+| The artifact | an image that mounts but will not boot | needs macOS: `softwareupdate`, `hdiutil`, `createinstallmedia` |
+
+`tools/verify-on-macos.sh` runs all of it in one pass and writes a report, so the same command works on a Mac, in a Linux container, or on a borrowed machine:
+
+```bash
+./tools/verify-on-macos.sh --version 10.15          # ~30s, downloads nothing
+./tools/verify-on-macos.sh --version 10.15 --build  # builds for real, 8-40GB of traffic
+```
+
+Add `--vm --osx-kvm ~/OSX-KVM` to also emit a QEMU script that boots the produced image behind OpenCore, which is the only way to see whether the installer actually starts. That script attaches the image as a CD and expects [OSX-KVM](https://github.com/kholia/OSX-KVM)'s `OpenCore.qcow2` and OVMF blobs; it is generated, not run, because watching the boot picker is a human job.
+
+On a non-macOS host the build step is skipped rather than failed.
+
+`tools/probe-urls.sh` fails only when a URL is definitively gone. Note that Apple's CDN answers **403** for a retired object, not 404 — a plain "status is not 200" check reads that as network noise and lets a dead link through.
 
 ---
 
