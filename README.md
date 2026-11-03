@@ -2,13 +2,15 @@
 
 Build bootable macOS installer ISOs and DMGs directly from Apple's servers — no Mac required.
 
+This is a self-use fork of [LongQT-sea/macos-iso-builder](https://github.com/LongQT-sea/macos-iso-builder). Upstream is unchanged; this fork only removes the parts that cannot work outside the original repo. See [Changes in this fork](#changes-in-this-fork).
+
 This project has two parts:
 1. A script (`mkmaciso`) that uses only macOS built-in tools and commands to download and install the full macOS installer from Apple's servers into **/Applications**, and then creates bootable ISO/DMG images.
 2. GitHub Action workflows that run `mkmaciso` on Azure datacenter-hosted Mac minis if you don't have macOS.
 
 ## Before you start
 
-Check [Release page](https://github.com/LongQT-sea/mkmaciso/releases/latest) first - someone might've already built what you need. If not, see [How to use](#how-to-use) to build your own.
+This fork has no prebuilt images attached. Build what you need yourself — the Recovery workflow takes 2-5 minutes.
 
 > [!Important]
 > GitHub-hosted runners are a free public resource — please use them responsibly.
@@ -42,12 +44,11 @@ Lion, Mountain Lion, Mavericks, Yosemite, El Capitan, Sierra, High Sierra, Mojav
 > <details>
 > <summary>Click here to watch a visual guide (GIF)</summary>
 >
-> ![How to fork and run workflow](https://raw.githubusercontent.com/LongQT-sea/macos-iso-builder/main/.github/how_to_fork_and_run_workflow.gif)
+> ![](./.github/how_to_fork_and_run_workflow.gif)
 >
 > </details>
 
-1. Star and then [Fork](https://github.com/LongQT-sea/macos-iso-builder/fork) this repository (requires a GitHub account).<br>
-   <img src="https://raw.githubusercontent.com/LongQT-sea/macos-iso-builder/main/.github/star_and_fork.jpg" width="500">
+1. Fork this repository (requires a GitHub account).
 2. Navigate to the **Actions** tab in your forked repository.
 3. Click the green **"I understand my workflows, go ahead and enable them"** button.
 4. Select a workflow from the left sidebar:
@@ -65,25 +66,63 @@ Lion, Mountain Lion, Mavericks, Yosemite, El Capitan, Sierra, High Sierra, Mojav
 
 ### Already have macOS? Run `mkmaciso` locally
 
-Quick run using Terminal.app (change `tahoe` to whatever you want):
+The script reads its version table from `versions.tsv`, so fetch both files:
 ```bash
-curl -s https://raw.githubusercontent.com/LongQT-sea/mkmaciso/main/mkmaciso | bash -s tahoe
-```
-
-Or download the script first, then run with parameters:
-```bash
-curl -O https://raw.githubusercontent.com/LongQT-sea/mkmaciso/main/mkmaciso
+BASE=https://raw.githubusercontent.com/<your-name>/macos-iso-builder/main
+curl -O "$BASE/mkmaciso" -O "$BASE/versions.tsv"
 chmod +x mkmaciso
 ./mkmaciso --help
+./mkmaciso --list              # every supported release
+./mkmaciso 26 iso --dry-run    # resolve the version, download nothing
 ```
 
 Running `./mkmaciso` without arguments gives you an interactive menu.
+
+If the table lives elsewhere, point at it with `MKMACISO_DATA`:
+
+```bash
+MKMACISO_DATA=/path/to/versions.tsv ./mkmaciso tahoe
+```
+
+The `curl … | bash` one-liner no longer works: a piped script has no directory to read `versions.tsv` from, and silently inventing versions would be worse than failing.
+
+---
+
+## Changes in this fork
+
+Only the pieces that hardcoded the upstream owner, depended on upstream-only privileges, or duplicated release metadata were touched. Image-building logic is unchanged.
+
+| What | Why |
+|---|---|
+| `preflight` job removed from both build workflows | It checked whether the actor had starred `LongQT-sea/macos-iso-builder` via 5 pages of `/users/{actor}/starred`. In any fork that check fails, so the first two runs were silently skipped and only the third run built anything. |
+| `refresh-forks-list.yml` deleted | Its job was guarded by `if: github.repository_owner == 'LongQT-sea'`, so it can never run in a fork. Left in place it would only show up as a skipped run every 6 hours. |
+| README links made relative | Images, the fork link and the `mkmaciso` download URLs all pointed at the upstream repo. |
+| `concurrency` groups added | Two dispatches of the same workflow now queue instead of racing for the same artifact name. |
+| `versions.tsv` is now the single source of truth | Release facts used to be copied into 5 places in `mkmaciso` plus a `case` block in the recovery workflow. Now there is one table. |
+| `mkmaciso --list`, `--dry-run`, `--dump-versions` | `--dry-run` resolves the version and prints the plan without downloading, which is what makes the table testable in CI. |
+| `tools/check-versions.sh` + `quality.yml` | Validates the table's schema and fails when it disagrees with the workflow option lists. |
+| `tr -d '_- '` replaced with `sed` | `tr` treats `_` to space as a reversed range and aborts under some locales, which killed the script before it printed anything. |
+
+Keeping this fork in sync with upstream is a `git merge` of the two workflow files; only the `preflight` job and the deleted cron workflow are expected to conflict.
+
+---
+
+## Adding a new macOS release
+
+One row in `versions.tsv`, then let CI tell you what else to touch:
+
+1. Append a row to `versions.tsv` (fields are documented at the top of the file).
+2. Add the release name to the `macos_version` options in `.github/workflows/build-macos-image.yml`.
+3. Run `./tools/check-versions.sh` — it reports every list that disagrees with the table.
+4. Run `./mkmaciso <version> iso --dry-run` to confirm the row resolves.
+
+Nothing in the script needs editing.
 
 ---
 
 ## Tips
 
-For VMs, just attach the ISO as a virtual CD drive. Proxmox users — if you want better performance, look into GPU passthrough. I have another repo ([OpenCore-ISO](https://github.com/LongQT-sea/OpenCore-ISO)) that might help with installation, and one for [Intel iGPU passthrough](https://github.com/LongQT-sea/intel-igpu-passthru) specifically.
+For VMs, just attach the ISO as a virtual CD drive. Proxmox users — if you want better performance, look into GPU passthrough. Upstream also has [OpenCore-ISO](https://github.com/LongQT-sea/OpenCore-ISO) that might help with installation, and one for [Intel iGPU passthrough](https://github.com/LongQT-sea/intel-igpu-passthru) specifically.
 
 For bootable USB drives, after you flash the DMG there will be leftover space on the drive. You can use that to create a FAT32 partition for your EFI folder if you need one.
 
@@ -96,6 +135,7 @@ If you're using `dd` on Linux, triple-check your target device. `dd` doesn't ask
 - 20-40GB of free space while building
 - Internet connection
 - sudo access
+- `versions.tsv` next to the script, or `MKMACISO_DATA` pointing at it
 
 ## Credits
 

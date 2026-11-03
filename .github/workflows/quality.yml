@@ -1,0 +1,55 @@
+name: Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version-table:
+    name: Version table
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Validate versions.tsv
+        run: ./tools/check-versions.sh
+
+      - name: Resolve every release
+        run: |
+          # Parsing runs without macOS, so a row that cannot be resolved is a
+          # table bug and should fail here rather than 40 minutes into a build.
+          ./mkmaciso --list
+
+          count=0
+          while IFS=$'\t' read -r code name num rest; do
+            case "$code" in
+              ''|*'#'*) continue ;;
+            esac
+            ./mkmaciso "$num" iso --dry-run > /dev/null
+            count=$((count + 1))
+          done < versions.tsv
+
+          echo "resolved $count releases"
+
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Shellcheck errors
+        run: shellcheck --severity=error mkmaciso tools/check-versions.sh
+
+      - name: Shellcheck report
+        run: shellcheck --format=gcc mkmaciso tools/check-versions.sh || true

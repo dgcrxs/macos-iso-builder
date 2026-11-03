@@ -23,65 +23,13 @@ on:
         required: false
         type: string
 
+concurrency:
+  group: recovery-iso-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  preflight:
-    if: ${{ inputs.macos_version != '' }}
-    runs-on: ubuntu-slim
-    timeout-minutes: 5
-    outputs:
-      _build: ${{ steps.check.outputs._build }}
-
-    steps:
-      - name: Preflight
-        id: check
-        run: |
-          echo "_build=false" >> $GITHUB_OUTPUT
-          sum() { printf '%s\n' "$@" >> "$GITHUB_STEP_SUMMARY"; }
-
-          # Third time's the charm
-          if [ ${{ github.run_attempt }} -ge 3 ] || [ ${{ github.run_number }} -ge 3 ]; then
-            echo "_build=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Most users arrive directly at the Actions tab without reading the
-          # README, missing the prebuilt images in the Releases tab. Requiring
-          # a star (step 1 of the README) reduces redundant builds - and runner
-          # costs - for images that may already exist in a recent forks list.
-          #
-          # GET /repos/{owner}/{repo}/stargazers has been admin/collaborator
-          # only since 2026-06-30, and Actions' app-install token is refused
-          # even on its own repo ("Resource not accessible by integration").
-          # Ask the reverse question instead - is this repo in the actor's
-          # starred list - which is still unrestricted. Sorted newest-first,
-          # so a star made just before dispatching lands on page 1.
-          FOUND=false
-          PAGE=1
-          while [ $PAGE -le 5 ]; do
-            DATA=$(curl -s \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/users/${{ github.actor }}/starred?per_page=100&page=${PAGE}")
-            [ "$(echo "$DATA" | jq -r 'type')" = "array" ] || break
-            echo "$DATA" | jq -e 'any(.[]; .full_name == "LongQT-sea/macos-iso-builder")' > /dev/null && FOUND=true && break
-            [ "$(echo "$DATA" | jq 'length')" -lt 100 ] && break
-            PAGE=$((PAGE + 1))
-          done
-
-          if [ "$FOUND" = "true" ]; then
-            echo "_build=true" >> $GITHUB_OUTPUT
-          else
-            sum "## Before you build - check if someone already did it for you :point_down:" \
-                "" \
-                "Browse the **[Recent Forks List](https://github.com/LongQT-sea/macos-iso-builder/releases/latest)** - someone may have already built the macOS version you need." \
-                "" \
-                "If you still need to build your own, star this repo first [LongQT-sea/macos-iso-builder](https://github.com/LongQT-sea/macos-iso-builder) - that's step 1 in the [README](https://github.com/LongQT-sea/macos-iso-builder#how-to-use). :star:" \
-                "<br>![star](https://raw.githubusercontent.com/LongQT-sea/macos-iso-builder/main/.github/star.jpg)"
-          fi
-
   build-recovery-iso:
-    needs: preflight
-    if: needs.preflight.outputs._build == 'true'
+    if: ${{ inputs.macos_version != '' }}
     runs-on: macos-latest
     timeout-minutes: 15
     permissions:
@@ -112,42 +60,37 @@ jobs:
       - name: Get version info
         id: version_info
         run: |
-          case "${{ github.event.inputs.macos_version }}" in
-            "High Sierra") KEY="high_sierra1" ;;
-            "Mojave") KEY="mojave" ;;
-            "Catalina") KEY="catalina1" ;;
-            "Big Sur") KEY="big_sur" ;;
-            "Monterey") KEY="monterey" ;;
-            "Ventura") KEY="ventura" ;;
-            "Sonoma") KEY="sonoma" ;;
-            "Sequoia") KEY="sequoia" ;;
-            "Tahoe") KEY="tahoe" ;;
-          esac
+          ROW=$(awk -F'\t' -v want="${{ inputs.macos_version }}" '
+            /^#/ { next }
+            NF < 10 { next }
+            $2 == want { print; exit }
+          ' versions.tsv)
 
-          case $KEY in
-            high_sierra1) INFO="Mac-7BA5B2D9E42DDD94:00000000000J80300:High_Sierra:" ;;
-            mojave) INFO="Mac-7BA5B2DFE22DDD8C:00000000000KXPG00:Mojave:" ;;
-            catalina1) INFO="Mac-CFF7D910A743CAAF:00000000000PHCD00:Catalina:" ;;
-            big_sur) INFO="Mac-2BD1B31983FE1663:00000000000000000:Big_Sur:" ;;
-            monterey) INFO="Mac-E43C1C25D4880AD6:00000000000000000:Monterey:" ;;
-            ventura) INFO="Mac-B4831CEBD52A0C4C:00000000000000000:Ventura:" ;;
-            sonoma) INFO="Mac-827FAC58A8FDFA22:00000000000000000:Sonoma:" ;;
-            sequoia) INFO="Mac-7BA5B2D9E42DDD94:00000000000000000:Sequoia:" ;;
-            tahoe) INFO="Mac-CFF7D910A743CAAF:00000000000000000:Tahoe:latest" ;;
-          esac
+          if [ -z "$ROW" ]; then
+            echo "::error::No row for '${{ inputs.macos_version }}' in versions.tsv"
+            exit 1
+          fi
 
-          IFS=':' read -r BOARD_ID MODEL VERSION_NAME OS_FLAG <<< "$INFO"
+          IFS=$'\t' read -r CODENAME NAME VER YEAR APP KIND URL BOARD MODEL OS <<< "$ROW"
 
-          echo "board_id=$BOARD_ID" >> $GITHUB_OUTPUT
+          if [ -z "$BOARD" ] || [ "$BOARD" = "-" ]; then
+            echo "::error::No recovery identifiers for $NAME in versions.tsv"
+            exit 1
+          fi
+
+          OS_FLAG=""
+          if [ "$OS" != "-" ]; then OS_FLAG="$OS"; fi
+
+          echo "board_id=$BOARD" >> $GITHUB_OUTPUT
           echo "model=$MODEL" >> $GITHUB_OUTPUT
-          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "version_name=$(printf '%s' "$NAME" | tr ' ' '_')" >> $GITHUB_OUTPUT
           echo "os_flag=$OS_FLAG" >> $GITHUB_OUTPUT
 
       - name: Download macOS Recovery
         id: download_recovery_image
         run: |
           echo "Downloading macOS ${{ steps.version_info.outputs.version_name }} recovery..."
-          
+
           if [ -n "${{ steps.version_info.outputs.os_flag }}" ]; then
             script -q /dev/null python3 macrecovery.py -b "${{ steps.version_info.outputs.board_id }}" -m "${{ steps.version_info.outputs.model }}" -os "${{ steps.version_info.outputs.os_flag }}" download
           else
@@ -192,15 +135,13 @@ jobs:
 
       - name: Sanitize release tag
         id: sanitize_tag
-        if: github.event.inputs.release_tag != ''
-        env:
-          RAW_TAG: ${{ github.event.inputs.release_tag }}
+        if: inputs.release_tag != ''
         run: |
-          sanitized_tag=$(printf '%s' "$RAW_TAG" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
+          sanitized_tag=$(printf '%s' "${{ inputs.release_tag }}" | sed 's/[^a-zA-Z0-9._-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
           echo "sanitized_tag=$sanitized_tag" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        if: github.event.inputs.release_tag != ''
+        if: inputs.release_tag != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION_NAME: ${{ steps.version_info.outputs.version_name }}

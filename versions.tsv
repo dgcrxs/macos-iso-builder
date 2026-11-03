@@ -1,0 +1,44 @@
+# Single source of truth for every macOS release this tool knows about.
+#
+# Fields are tab-separated, in this order:
+#
+#   codename         normalized slug used on the command line (lower case, no separators)
+#   name             display name, spaces allowed
+#   version          version number used by Apple's tools
+#   year             release year, shown in the interactive menu
+#   app              installer app name in /Applications
+#   kind             how the installer is obtained:
+#                      legacy-dmg        full InstallMacOSX.dmg / InstallOS.dmg download
+#                      recovery-protocol Apple recovery protocol (Mavericks only)
+#                      catalog-base      direct file fetch from Apple's software update CDN
+#                      softwareupdate    softwareupdate --fetch-full-installer
+#   url              download URL or base URL for the kind above, "-" when unused
+#   recovery_board   macrecovery board id, "-" when the recovery path is unsupported
+#   recovery_model   macrecovery model, "-" when unused
+#   recovery_os      macrecovery -os argument, "-" when unused
+#
+# Never leave a field empty: use "-". An empty field would collapse into the
+# neighbouring one, because tab is IFS whitespace and runs get merged.
+#
+# Adding a new release means adding one row here. Update
+# .github/workflows/build-macos-image.yml options as well; the drift check in
+# tools/check-versions.sh fails the build when the two disagree.
+#
+# codename	name	version	year	app	kind	url	recovery_board	recovery_model	recovery_os
+lion	Lion	10.7	2011	Install Mac OS X Lion	legacy-dmg	https://updates.cdn-apple.com/2021/macos/041-7683-20210614-E610947E-C7CE-46EB-8860-D26D71F0D3EA/InstallMacOSX.dmg	-	-	-
+mountainlion	Mountain Lion	10.8	2012	Install OS X Mountain Lion	legacy-dmg	https://updates.cdn-apple.com/2021/macos/031-0627-20210614-90D11F33-1A65-42DD-BBEA-E1D9F43A6B3F/InstallMacOSX.dmg	-	-	-
+mavericks	Mavericks	10.9	2013	Install OS X Mavericks	recovery-protocol	-	-	-	-
+yosemite	Yosemite	10.10	2014	Install OS X Yosemite	legacy-dmg	http://updates-http.cdn-apple.com/2019/cert/061-41343-20191023-02465f92-3ab5-4c92-bfe2-b725447a070d/InstallMacOSX.dmg	-	-	-
+elcapitan	El Capitan	10.11	2015	Install OS X El Capitan	legacy-dmg	http://updates-http.cdn-apple.com/2019/cert/061-41424-20191024-218af9ec-cf50-4516-9011-228c78eda3d2/InstallMacOSX.dmg	-	-	-
+sierra	Sierra	10.12	2016	Install macOS Sierra	legacy-dmg	http://updates-http.cdn-apple.com/2019/cert/061-39476-20191023-48f365f4-0015-4c41-9f44-39d3d2aca067/InstallOS.dmg	-	-	-
+highsierra	High Sierra	10.13	2017	Install macOS High Sierra	catalog-base	https://swcdn.apple.com/content/downloads/06/50/041-91758-A_M8T44LH2AW/b5r4og05fhbgatve4agwy4kgkzv07mdid9/	Mac-7BA5B2D9E42DDD94	00000000000J80300	-
+mojave	Mojave	10.14	2018	Install macOS Mojave	catalog-base	https://swcdn.apple.com/content/downloads/17/32/061-26589-A_8GJTCGY9PC/25fhcu905eta7wau7aoafu8rvdm7k1j4el/	Mac-7BA5B2DFE22DDD8C	00000000000KXPG00	-
+catalina	Catalina	10.15	2019	Install macOS Catalina	catalog-base	https://swcdn.apple.com/content/downloads/26/37/001-68446/r1dbqtmf3mtpikjnd04cq31p4jk91dceh8/	Mac-CFF7D910A743CAAF	00000000000PHCD00	-
+bigsur	Big Sur	11	2020	Install macOS Big Sur	softwareupdate	-	Mac-2BD1B31983FE1663	00000000000000000	-
+monterey	Monterey	12	2021	Install macOS Monterey	softwareupdate	-	Mac-E43C1C25D4880AD6	00000000000000000	-
+ventura	Ventura	13	2022	Install macOS Ventura	softwareupdate	-	Mac-B4831CEBD52A0C4C	00000000000000000	-
+sonoma	Sonoma	14	2023	Install macOS Sonoma	softwareupdate	-	Mac-827FAC58A8FDFA22	00000000000000000	-
+sequoia	Sequoia	15	2024	Install macOS Sequoia	softwareupdate	-	Mac-7BA5B2D9E42DDD94	00000000000000000	-
+# tahoe reuses Catalina's board id on purpose: macrecovery only needs it to sign
+# the request, and this is the pair upstream shipped and validated.
+tahoe	Tahoe	26	2025	Install macOS Tahoe	softwareupdate	-	Mac-CFF7D910A743CAAF	00000000000000000	latest
